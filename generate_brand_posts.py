@@ -24,7 +24,7 @@ from feedgen.feed import FeedGenerator
 from PIL import Image, ImageDraw, ImageFont
 
 BASE_DIR = Path(__file__).parent
-PAGES_BASE_URL = "https://marketingimmobiliaremalfatti-max.github.io/malfatti-brand-posts/"
+PAGES_BASE_URL = "https://marketingimmobiliaremalfatti-max.github.io/postcreati/"
 
 TEMPLATE_PATH = BASE_DIR / "assets" / "template_brand.png"
 FONT_PATH = BASE_DIR / "assets" / "fonts" / "Poppins-Bold.ttf"
