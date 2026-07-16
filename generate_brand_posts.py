@@ -13,6 +13,7 @@ sono pensati per essere salvati e riusati nel tempo su Postpikr.
 """
 
 import json
+import re
 import sys
 import textwrap
 from io import BytesIO
@@ -32,16 +33,53 @@ TOPICS_FILE = BASE_DIR / "data" / "brand_topics.json"
 IMAGES_DIR = BASE_DIR / "docs" / "brand-images"
 OUTPUT_FILE = BASE_DIR / "docs" / "brand-feed.xml"
 
-# Area di testo sicura dentro la bolla (canvas 3375x3375), con margine
-# rispetto ai bordi arrotondati della forma.
-TEXT_BOX = (110, 140, 900, 780)  # left, top, right, bottom
+TEXT_BOX = (110, 130, 950, 850)  # left, top, right, bottom
 TEXT_COLOR = (255, 255, 255)
-FONT_SIZE = 92
-LINE_SPACING = 14
+MAX_FONT_SIZE = 150
+MIN_FONT_SIZE = 60
+LINE_SPACING_RATIO = 0.2  # spazio tra le righe, proporzionale alla dimensione del font
+
+# Rimuove gli emoji dal testo scritto SOPRA la foto: il font usato per il
+# disegno (Poppins) non contiene i glifi emoji, quindi comparirebbe un
+# quadratino vuoto. L'emoji resta comunque nel testo del post (caption),
+# dove viene mostrato come testo normale da Facebook/Instagram.
+EMOJI_PATTERN = re.compile(
+    "["
+    "\U0001F300-\U0001FAFF"
+    "\U00002300-\U000027BF"
+    "\U0001F1E6-\U0001F1FF"
+    "\U00002190-\U000021FF"
+    "\U00002B00-\U00002BFF"
+    "\U0000FE0F"
+    "]+",
+    flags=re.UNICODE,
+)
+
+
+def strip_emoji(text):
+    return EMOJI_PATTERN.sub("", text).strip()
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (compatible; MalfattiBrandBot/1.0)"
 }
+
+
+def fit_text_in_box(draw, text, max_width, max_height):
+    """Trova la dimensione di font più grande (tra MIN e MAX_FONT_SIZE) che
+    permette al testo, andando a capo, di stare dentro la box disponibile.
+    Restituisce (font, lines, line_height)."""
+    for size in range(MAX_FONT_SIZE, MIN_FONT_SIZE - 1, -4):
+        font = ImageFont.truetype(str(FONT_PATH), size)
+        lines = wrap_text_to_fit(draw, text, font, max_width)
+        line_height = font.getbbox("Ag")[3] + int(size * LINE_SPACING_RATIO)
+        total_height = line_height * len(lines)
+        if total_height <= max_height:
+            return font, lines, line_height
+
+    font = ImageFont.truetype(str(FONT_PATH), MIN_FONT_SIZE)
+    lines = wrap_text_to_fit(draw, text, font, max_width)
+    line_height = font.getbbox("Ag")[3] + int(MIN_FONT_SIZE * LINE_SPACING_RATIO)
+    return font, lines, line_height
 
 
 def wrap_text_to_fit(draw, text, font, max_width):
@@ -85,8 +123,6 @@ def compose_brand_image(topic):
     template = Image.open(TEMPLATE_PATH).convert("RGBA")
     canvas_w, canvas_h = template.size
 
-    # Ridimensiona/croppa la foto per riempire l'intero canvas quadrato
-    # (object-fit: cover), centrata.
     photo_ratio = photo.width / photo.height
     canvas_ratio = canvas_w / canvas_h
     if photo_ratio > canvas_ratio:
@@ -103,17 +139,16 @@ def compose_brand_image(topic):
     canvas = photo_cropped.convert("RGBA")
     canvas.alpha_composite(template)
 
-    # Scrive la domanda dentro l'area della bolla
     draw = ImageDraw.Draw(canvas)
-    font = ImageFont.truetype(str(FONT_PATH), FONT_SIZE)
     box_left, box_top, box_right, box_bottom = TEXT_BOX
     max_width = box_right - box_left
+    max_height = box_bottom - box_top
 
-    lines = wrap_text_to_fit(draw, topic["quote"], font, max_width)
+    quote_for_image = strip_emoji(topic["quote"])
+    font, lines, line_height = fit_text_in_box(draw, quote_for_image, max_width, max_height)
 
-    line_height = font.getbbox("Ag")[3] + LINE_SPACING
     total_height = line_height * len(lines)
-    y = box_top + max(0, (box_bottom - box_top - total_height) // 2)
+    y = box_top + max(0, (max_height - total_height) // 2)
 
     for line in lines:
         draw.text((box_left, y), line, font=font, fill=TEXT_COLOR)
