@@ -22,6 +22,7 @@ from urllib.parse import urljoin
 
 import requests
 from feedgen.feed import FeedGenerator
+from fontTools.ttLib import TTFont
 from PIL import Image, ImageDraw, ImageFont
 
 BASE_DIR = Path(__file__).parent
@@ -39,25 +40,27 @@ MAX_FONT_SIZE = 150
 MIN_FONT_SIZE = 60
 LINE_SPACING_RATIO = 0.2  # spazio tra le righe, proporzionale alla dimensione del font
 
-# Rimuove gli emoji dal testo scritto SOPRA la foto: il font usato per il
-# disegno (Poppins) non contiene i glifi emoji, quindi comparirebbe un
-# quadratino vuoto. L'emoji resta comunque nel testo del post (caption),
-# dove viene mostrato come testo normale da Facebook/Instagram.
-EMOJI_PATTERN = re.compile(
-    "["
-    "\U0001F300-\U0001FAFF"
-    "\U00002300-\U000027BF"
-    "\U0001F1E6-\U0001F1FF"
-    "\U00002190-\U000021FF"
-    "\U00002B00-\U00002BFF"
-    "\U0000FE0F"
-    "]+",
-    flags=re.UNICODE,
-)
+
+# Rimuove dal testo scritto SOPRA la foto qualsiasi carattere che il font
+# (Poppins) non sa disegnare -- tipicamente emoji e simboli, che altrimenti
+# comparirebbero come un quadratino vuoto. Molto più affidabile di una
+# lista di range Unicode, perché controlla il font reale invece di
+# indovinare quali emoji potrebbero comparire nei testi.
+# L'emoji resta comunque nel testo del post (caption), dove viene mostrato
+# come testo normale da Facebook/Instagram.
+def _load_font_charset(font_path):
+    tt = TTFont(font_path)
+    charset = set()
+    for table in tt["cmap"].tables:
+        charset |= set(table.cmap.keys())
+    return charset
 
 
-def strip_emoji(text):
-    return EMOJI_PATTERN.sub("", text).strip()
+def strip_unsupported_chars(text, allowed_codepoints):
+    return "".join(ch for ch in text if ord(ch) in allowed_codepoints or ch.isspace()).strip()
+
+
+FONT_CHARSET = _load_font_charset(str(FONT_PATH)) if FONT_PATH.exists() else set()
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (compatible; MalfattiBrandBot/1.0)"
@@ -144,7 +147,7 @@ def compose_brand_image(topic):
     max_width = box_right - box_left
     max_height = box_bottom - box_top
 
-    quote_for_image = strip_emoji(topic["quote"])
+    quote_for_image = strip_unsupported_chars(topic["quote"], FONT_CHARSET)
     font, lines, line_height = fit_text_in_box(draw, quote_for_image, max_width, max_height)
 
     total_height = line_height * len(lines)
